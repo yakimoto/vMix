@@ -1,0 +1,105 @@
+import React, { useState, useEffect, useRef } from "react";
+import NDI from "ndi";
+import NDISend from "ndi-send";
+import NDIReceiver from "ndi-receiver";
+
+function NDISwitcher() {
+  const ndi = useRef(null);
+  const ndiSend = useRef(null);
+  const [sources, setSources] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [previewQuality, setPreviewQuality] = useState("medium");
+
+  useEffect(() => {
+    async function fetchSources() {
+      try {
+        // Create a new NDI instance and connect to the NDI router
+        ndi.current = new NDI();
+        await ndi.current.connect();
+
+        // Create a new NDISend instance and start sending NDI output
+        ndiSend.current = new NDISend({
+          name: "My NDI Switcher Output",
+          groups: ["My NDI Switcher Group"],
+        });
+        await ndiSend.current.start();
+
+        // Get the list of NDI sources
+        const sources = await ndi.current.getSources();
+        setSources(sources);
+      } catch (error) {
+        console.error("Failed to initialize NDI:", error);
+      } finally {
+        setIsLoading(false); // set loading state to false when sources are fetched
+      }
+    }
+
+    fetchSources();
+
+    // Stop sending NDI output and receiving NDI streams when the component is unmounted
+    return () => {
+      if (ndiSend.current) {
+        ndiSend.current.stop().catch((error) => {
+          console.error("Failed to stop NDI send:", error);
+        });
+      }
+    };
+  }, []);
+
+  function switchSource(sourceName) {
+    ndi.current.switchSource(sourceName);
+  }
+
+  function handlePreviewQualityChange(e) {
+    setPreviewQuality(e.target.value);
+  }
+
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
+
+  return (
+    <div>
+      <h1>NDI Video Switcher</h1>
+      <div>
+        Preview quality:
+        <select value={previewQuality} onChange={handlePreviewQualityChange}>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+      {sources.map((source) => (
+        <div key={source}>
+          <video
+            id={source}
+            autoPlay
+            width={previewQuality === "low" ? "320" : "640"}
+            height={previewQuality === "low" ? "240" : "480"}
+          />
+          <button onClick={() => switchSource(source)}>Switch to {source}</button>
+          <NDIReceiver
+            source={source}
+            onVideo={(frame) => {
+              const videoElement = document.getElementById(source);
+              ndiSend.current.send({
+                data: frame.data.buffer,
+                width: frame.width,
+                height: frame.height,
+                fourCC: frame.fourCC,
+              });
+              createImageBitmap(frame.getImageData()).then((imageBitmap) => {
+                videoElement.srcObject = imageBitmap;
+              });
+            }}
+            onError={(error) => {
+              console.error(`Failed to start NDI receiver for ${source}:`, error);
+            }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default NDISwitcher;
